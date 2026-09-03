@@ -1,0 +1,216 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  OPERATIONS_USER
+  SALES_USER
+}
+
+enum WorkOrderStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TransferStatus {
+  REQUESTED
+  DISPATCHED
+  RECEIVED
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING
+  RESERVED
+  CANCELLED
+  COMPLETED
+}
+
+enum ReservationStatus {
+  PENDING
+  RESERVED
+  RELEASED
+}
+
+model User {
+  id           String          @id @default(cuid())
+  email        String          @unique
+  name         String
+  passwordHash String
+  role         Role            @default(OPERATIONS_USER)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  assignedWorkOrders WorkOrder[]   @relation("AssignedWorkOrders")
+  transfersRequested Transfer[]    @relation("RequestedTransfers")
+  customerOrders     CustomerOrder[]
+
+  @@map("users")
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inventory           Inventory[]
+  workOrders          WorkOrder[]
+  transfersAsSource   Transfer[]  @relation("TransferSource")
+  transfersAsDest     Transfer[]  @relation("TransferDestination")
+
+  @@map("locations")
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items Item[]
+
+  @@map("categories")
+}
+
+model Item {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  unit        String   @default("units")
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  batches     Batch[]
+  inventory   Inventory[]
+  workOrders  WorkOrder[]
+  transfers   Transfer[]
+  orderItems  OrderItem[]
+
+  @@index([categoryId])
+  @@map("items")
+}
+
+model Batch {
+  id          String    @id @default(cuid())
+  batchNumber String
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id])
+  expiryDate  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  inventory Inventory[]
+
+  @@unique([itemId, batchNumber])
+  @@index([itemId])
+  @@map("batches")
+}
+
+model Inventory {
+  id               String   @id @default(cuid())
+  itemId           String
+  item             Item     @relation(fields: [itemId], references: [id])
+  locationId       String
+  location         Location @relation(fields: [locationId], references: [id])
+  batchId          String?
+  batch            Batch?   @relation(fields: [batchId], references: [id])
+  physicalQuantity Int      @default(0)
+  reservedQuantity Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([itemId, locationId, batchId])
+  @@index([itemId])
+  @@index([locationId])
+  @@index([batchId])
+  @@map("inventory")
+}
+
+model WorkOrder {
+  id               String          @id @default(cuid())
+  locationId       String
+  location         Location        @relation(fields: [locationId], references: [id])
+  itemId           String
+  item             Item            @relation(fields: [itemId], references: [id])
+  requiredQuantity Int
+  assignedUserId   String
+  assignedUser     User            @relation("AssignedWorkOrders", fields: [assignedUserId], references: [id])
+  status           WorkOrderStatus @default(ASSIGNED)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  transfers        Transfer[]
+
+  @@index([locationId])
+  @@index([itemId])
+  @@index([assignedUserId])
+  @@map("work_orders")
+}
+
+model Transfer {
+  id                    String         @id @default(cuid())
+  sourceLocationId      String
+  sourceLocation        Location       @relation("TransferSource", fields: [sourceLocationId], references: [id])
+  destinationLocationId String
+  destinationLocation   Location       @relation("TransferDestination", fields: [destinationLocationId], references: [id])
+  itemId                String
+  item                  Item           @relation(fields: [itemId], references: [id])
+  quantity              Int
+  requestedById         String
+  requestedBy           User           @relation("RequestedTransfers", fields: [requestedById], references: [id])
+  status                TransferStatus @default(REQUESTED)
+  workOrderId           String?
+  workOrder             WorkOrder?     @relation(fields: [workOrderId], references: [id])
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@index([sourceLocationId])
+  @@index([destinationLocationId])
+  @@index([itemId])
+  @@index([requestedById])
+  @@index([workOrderId])
+  @@map("transfers")
+}
+
+model CustomerOrder {
+  id          String      @id @default(cuid())
+  customer    String
+  createdById String
+  createdBy   User        @relation(fields: [createdById], references: [id])
+  status      OrderStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  items OrderItem[]
+
+  @@index([createdById])
+  @@map("customer_orders")
+}
+
+model OrderItem {
+  id                String            @id @default(cuid())
+  customerOrderId   String
+  customerOrder     CustomerOrder     @relation(fields: [customerOrderId], references: [id], onDelete: Cascade)
+  itemId            String
+  item              Item              @relation(fields: [itemId], references: [id])
+  inventoryId       String?
+  quantity          Int
+  reservationStatus ReservationStatus @default(PENDING)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([customerOrderId])
+  @@index([itemId])
+  @@map("order_items")
+}
